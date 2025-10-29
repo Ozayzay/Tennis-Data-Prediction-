@@ -1,0 +1,55 @@
+# Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data files (large CSVs)
+data/raw/*.csv
+data/processed/*.csv
+data/raw/*.parquet
+data/processed/*.parquet
+
+# BUT keep the folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Model files (can be large)
+results/models/*.pkl
+results/models/*.h5
+results/models/*.pt
+
+# Results and outputs
+*.log
+*.out
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Project specific
+*.pdf
+
