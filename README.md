@@ -357,33 +357,50 @@ Applied `pd.get_dummies(drop_first=True)` to **7 categorical features**:
 
 ### 3. Modeling & Evaluation
 
-[To be completed in `03_modeling_and_evaluation.ipynb`]
+#### **Data Split Strategy**
 
-**Train/Validation/Test Split**:
+- **Training**: 2014-2022 (104,874 matches, 84.5%)
+- **Validation**: 2023 (10,663 matches, 8.6%)
+- **Test**: 2024 (8,560 matches, 6.9%)
+- **Note**: `tourney_date` dropped from features (used only for splitting)
 
-- Training: 2014-2022 (9 years)
-- Validation: 2023 (1 year)
-- Test: 2024 (1 year)
+---
 
-**Planned Classification Algorithms**:
+#### **Baseline Model 1: Decision Tree (No Feature Engineering)** ✅
 
-- Logistic Regression (baseline)
-- Decision Tree
-- Random Forest
+**Purpose**: Establish baseline performance before feature engineering
+
+**Configuration**:
+
+- Algorithm: DecisionTreeClassifier
+- Parameters: `max_depth=10`, `random_state=42`
+- Features: 75 (preprocessed features only)
+
+**Results**:
+
+| Metric        | Training | Validation | Test   |
+| ------------- | -------- | ---------- | ------ |
+| **Accuracy**  | 65.96%   | 62.68%     | 62.14% |
+| **Precision** | 0.6518   | 0.6168     | 0.6136 |
+| **Recall**    | 0.6555   | 0.6264     | 0.6208 |
+| **F1-Score**  | 0.6536   | 0.6215     | 0.6172 |
+
+**Key Findings**:
+
+- Top 3 features: `player1_rank` (47.4%), `player2_rank` (36.1%), `player2_age` (4.2%)
+- Overfitting gap: 3.28% (train-val) - acceptable
+- Baseline accuracy: ~62% on unseen 2024 data
+
+---
+
+#### **Planned Models** (To be completed)
+
+- Logistic Regression (linear baseline)
+- Random Forest (ensemble method)
 - Gradient Boosting (XGBoost/LightGBM)
 - Support Vector Machine (SVM)
 - k-Nearest Neighbors (k-NN)
-
-**Evaluation Metrics**:
-
-- Accuracy, Precision, Recall, F1-Score
-- ROC-AUC, Confusion Matrix
-- Feature importance analysis
-
-**Hyperparameter Tuning**:
-
-- GridSearchCV or RandomizedSearchCV
-- Cross-validation on training set
+- Models with engineered features (rank_diff, age_diff, etc.)
 
 ---
 
@@ -499,17 +516,30 @@ Applied `pd.get_dummies(drop_first=True)` to **7 categorical features**:
 
 ---
 
-#### **3. `03_modeling_and_evaluation.ipynb`** (Planned)
+#### **3. `modeling_and_evaluation.ipynb`** ✅ BASELINE COMPLETED
 
-**Planned Sections**:
+**Completed Sections**:
 
-1. Train/validation/test split (2014-2022 / 2023 / 2024)
-2. Baseline models (Logistic Regression, Decision Tree)
-3. Advanced models (Random Forest, XGBoost, SVM, k-NN)
-4. Hyperparameter tuning (GridSearchCV)
-5. Model evaluation and comparison
+1. Import libraries and load preprocessed data (77 features, 124,097 matches)
+2. Train/validation/test split by date (2014-2022 / 2023 / 2024)
+3. Baseline Decision Tree model training
+4. Performance evaluation (accuracy, precision, recall, F1-score)
+5. Confusion matrix and classification report
 6. Feature importance analysis
-7. Final results visualization
+7. Results summary
+
+**Outputs**:
+
+- `results/baseline_dt_feature_importance.csv` (feature rankings)
+- Confusion matrix visualization
+- Performance metrics across train/val/test sets
+
+**Planned Additions**:
+
+- Additional models (Random Forest, XGBoost, Logistic Regression)
+- Models with feature-engineered datasets
+- Hyperparameter tuning
+- Model comparison and final selection
 
 ---
 
@@ -569,11 +599,14 @@ Then open `notebooks/EDA_and_preprocessing.ipynb` and run cells sequentially.
 
 ### ✅ Phase 3: Final Project Delivery
 
+- [x] Baseline model trained (Decision Tree, 62.14% test accuracy)
+- [ ] Feature engineering (rank_diff, age_diff, surface win rates)
+- [ ] Multiple classification algorithms (3+ models)
+- [ ] Hyperparameter tuning
+- [ ] Model comparison and evaluation
 - [ ] Clustering analysis (3+ algorithms)
 - [ ] Outlier detection (3+ methods)
-- [ ] Feature selection
-- [ ] Classification (3+ algorithms)
-- [ ] Hyperparameter tuning
+- [ ] Feature selection (mutual information, RFE)
 - [ ] Final report (max 2 pages)
 - [ ] Clean, well-documented code
 
