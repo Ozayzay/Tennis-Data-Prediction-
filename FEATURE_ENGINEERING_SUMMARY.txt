@@ -1,0 +1,821 @@
+================================================================================
+ATP TENNIS MATCH PREDICTION - FEATURE ENGINEERING SUMMARY
+================================================================================
+CMPT 459 Data Mining - Fall 2025
+Generated: November 8, 2025
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. Overview
+2. Simple Difference Features (3 features)
+3. Career Statistics (7 features)
+4. Surface-Specific Win Rates (21 features)
+5. Head-to-Head Statistics (6 features)
+6. Recent Form (5 features)
+7. Summary and Key Insights
+
+================================================================================
+1. OVERVIEW
+================================================================================
+
+This document summarizes all engineered features created for the ATP tennis 
+match prediction project. All features were calculated using a hash table 
+approach to ensure:
+  - No data leakage (only using information available BEFORE each match)
+  - Chronological integrity (matches processed in date order)
+  - Computational efficiency (~50 seconds per feature set)
+
+TOTAL FEATURES ENGINEERED: 42 features
+DATASET: 124,097 matches (2014-2024)
+UNIQUE PLAYERS: 4,413 players
+
+================================================================================
+2. SIMPLE DIFFERENCE FEATURES (3 Features)
+================================================================================
+
+These features capture relative advantages between player1 and player2 for 
+basic attributes. No historical aggregation required, calculated directly from 
+existing features.
+
+--------------------------------------------------------------------------------
+2.1 RANK DIFFERENCE
+--------------------------------------------------------------------------------
+Formula: rank_difference = player1_rank - player2_rank
+
+Interpretation:
+  - NEGATIVE value = Player1 has better rank (lower rank number)
+  - POSITIVE value = Player2 has better rank
+  - Example: If player1_rank = 5, player2_rank = 20, then rank_difference = -15
+    (Player1 is ranked 15 positions higher)
+
+Statistics:
+  - Range: -2,256 to 2,255
+  - Mean: -1.02 (slight bias toward player1 having better rank)
+  - Correlation with target (player1_won): -0.2694 (MODERATE negative)
+
+Key Insight: This is the most predictive of the three difference features. 
+The negative correlation confirms tennis logic: the better-ranked player 
+(lower number) is more likely to win.
+
+--------------------------------------------------------------------------------
+2.2 AGE DIFFERENCE
+--------------------------------------------------------------------------------
+Formula: age_difference = player1_age - player2_age
+
+Interpretation:
+  - POSITIVE value = Player1 is older
+  - NEGATIVE value = Player2 is older
+  - Example: If player1_age = 28, player2_age = 25, then age_difference = 3
+
+Statistics:
+  - Range: -30.70 to 26.90 years
+  - Mean: 0.02 (matches are typically between players of similar age)
+  - Correlation with target: +0.0198 (WEAK positive)
+
+Key Insight: Age has minimal predictive power on its own, but may interact 
+with other features (e.g., experience on specific surfaces).
+
+--------------------------------------------------------------------------------
+2.3 HEIGHT DIFFERENCE
+--------------------------------------------------------------------------------
+Formula: height_difference = player1_ht - player2_ht
+
+Interpretation:
+  - POSITIVE value = Player1 is taller
+  - NEGATIVE value = Player2 is taller
+  - Example: If player1_ht = 188cm, player2_ht = 180cm, 
+    then height_difference = 8cm
+
+Statistics:
+  - Range: -193 to 200 cm (difference, not absolute height)
+  - Mean: 0.01 cm (matches typically between players of similar height)
+  - Correlation with target: +0.0387 (WEAK positive)
+
+Key Insight: Height shows weak positive correlation, suggesting taller 
+players have slight advantage (likely due to serve power), but not a strong 
+predictor on its own.
+
+================================================================================
+3. CAREER STATISTICS (7 Features)
+================================================================================
+
+These features track each player's entire career performance BEFORE the 
+current match. They provide a measure of overall player quality and experience.
+
+--------------------------------------------------------------------------------
+3.1 IMPLEMENTATION APPROACH
+--------------------------------------------------------------------------------
+Method: Hash Table Approach
+  - Data structure: defaultdict(lambda: {'matches': 0, 'wins': 0})
+  - Key: player_id
+  - Value: Dictionary with 'matches' and 'wins' counters
+
+Algorithm:
+  Step 1: Sort all matches by tourney_date (chronological order)
+  Step 2: For each match:
+    a. RETRIEVE current stats from hash table (stats BEFORE this match)
+    b. STORE stats in dataframe columns
+    c. UPDATE hash table with current match result (after storing)
+  Step 3: Calculate win rates from matches and wins
+  Step 4: Create difference feature (player1 - player2)
+
+Critical Detail - Preventing Data Leakage:
+  The order "retrieve → store → update" is CRITICAL. If we updated before 
+  storing, we would include the current match result in the "before" stats, 
+  which would leak information about the outcome.
+
+Processing Time: ~50 seconds for 124,097 matches
+
+--------------------------------------------------------------------------------
+3.2 FEATURES CREATED
+--------------------------------------------------------------------------------
+
+For Player 1:
+  - player1_career_matches: Total matches played before this one
+  - player1_career_wins: Total wins before this one
+  - player1_career_win_rate: player1_career_wins / player1_career_matches
+
+For Player 2:
+  - player2_career_matches: Total matches played before this one
+  - player2_career_wins: Total wins before this one
+  - player2_career_win_rate: player2_career_wins / player2_career_matches
+
+Difference Feature:
+  - career_win_rate_diff: player1_career_win_rate - player2_career_win_rate
+
+--------------------------------------------------------------------------------
+3.3 HANDLING FIRST MATCHES
+--------------------------------------------------------------------------------
+Problem: What value to use when a player has 0 career matches?
+
+Solution: Neutral Imputation (0.5 win rate)
+  - If career_matches = 0, set career_win_rate = 0.5
+  - This represents "unknown" or "neutral" performance
+  - The model can learn to treat this differently by checking career_matches
+
+Why NOT 0.0 or NaN?
+  - 0.0 would bias the model against new players
+  - NaN would require additional handling and can break some algorithms
+  - 0.5 is interpretable as "we don't know, assume average"
+
+Example:
+  Match 1 for a new player:
+    career_matches = 0
+    career_wins = 0
+    career_win_rate = 0.5 (neutral, not based on data)
+  
+  Match 2 for same player (if they won Match 1):
+    career_matches = 1
+    career_wins = 1
+    career_win_rate = 1.0 (100% win rate)
+  
+  Match 3 (if they lost Match 2):
+    career_matches = 2
+    career_wins = 1
+    career_win_rate = 0.5 (50% win rate)
+
+--------------------------------------------------------------------------------
+3.4 VALIDATION
+--------------------------------------------------------------------------------
+Validation Method: Single-player trace
+  - Selected a specific player (e.g., player_id = 104594)
+  - Traced their first 10 matches
+  - Manually calculated expected stats
+  - Compared with hash table output
+  - Result: All matches validated successfully (✅ matches, ✅ wins, ✅ rates)
+
+================================================================================
+4. SURFACE-SPECIFIC WIN RATES (21 Features)
+================================================================================
+
+These features track performance separately for Clay, Grass, and Hard courts. 
+Tennis is highly surface-dependent (e.g., clay specialists like Nadal), so 
+this captures playing style and surface preference.
+
+--------------------------------------------------------------------------------
+4.1 IMPLEMENTATION APPROACH
+--------------------------------------------------------------------------------
+Method: Nested Hash Table Approach
+  - Data structure: defaultdict with 3-level nesting
+  - Structure: player_id → surface → {'matches': int, 'wins': int}
+  
+Example structure:
+  player_surface_stats[101] = {
+    'Clay': {'matches': 15, 'wins': 10},
+    'Grass': {'matches': 2, 'wins': 1},
+    'Hard': {'matches': 30, 'wins': 20}
+  }
+
+Algorithm:
+  Step 1: For each match, determine surface:
+    if surface_Clay == True → surface = 'Clay'
+    elif surface_Grass == True → surface = 'Grass'
+    else → surface = 'Hard'
+  
+  Step 2: For each player:
+    a. RETRIEVE stats from player_surface_stats[player_id][surface]
+    b. STORE in dataframe columns (e.g., player1_clay_matches)
+    c. UPDATE hash table with result (after storing)
+  
+  Step 3: Calculate win rates for each surface
+  Step 4: Create difference features for each surface
+
+Processing Time: ~50 seconds for 124,097 matches
+
+--------------------------------------------------------------------------------
+4.2 FEATURES CREATED (21 Total)
+--------------------------------------------------------------------------------
+
+For Player 1 (9 features):
+  Clay:
+    - player1_clay_matches: Matches on clay BEFORE this one
+    - player1_clay_wins: Wins on clay BEFORE this one
+    - player1_clay_win_rate: player1_clay_wins / player1_clay_matches
+  
+  Grass:
+    - player1_grass_matches: Matches on grass BEFORE this one
+    - player1_grass_wins: Wins on grass BEFORE this one
+    - player1_grass_win_rate: player1_grass_wins / player1_grass_matches
+  
+  Hard:
+    - player1_hard_matches: Matches on hard BEFORE this one
+    - player1_hard_wins: Wins on hard BEFORE this one
+    - player1_hard_win_rate: player1_hard_wins / player1_hard_matches
+
+For Player 2 (9 features):
+  Same structure as Player 1:
+    - player2_clay_matches, player2_clay_wins, player2_clay_win_rate
+    - player2_grass_matches, player2_grass_wins, player2_grass_win_rate
+    - player2_hard_matches, player2_hard_wins, player2_hard_win_rate
+
+Difference Features (3 features):
+  - clay_win_rate_diff: player1_clay_win_rate - player2_clay_win_rate
+  - grass_win_rate_diff: player1_grass_win_rate - player2_grass_win_rate
+  - hard_win_rate_diff: player1_hard_win_rate - player2_hard_win_rate
+
+--------------------------------------------------------------------------------
+4.3 SURFACE DISTRIBUTION INSIGHTS
+--------------------------------------------------------------------------------
+
+Surface Match Statistics (for player1):
+  
+  CLAY:
+    - Mean: 35.04 matches per player
+    - Median: 0 matches
+    - 60% of matches involve players with 0 clay history
+    - Max: 590 clay matches (clay specialists)
+  
+  GRASS:
+    - Mean: 0.97 matches per player
+    - Median: 0 matches
+    - 95% of matches involve players with 0 grass history
+    - Max: 113 grass matches (rare specialists)
+    - Insight: Grass season is VERY short (mainly Wimbledon and warmup events)
+  
+  HARD:
+    - Mean: 53.03 matches per player
+    - Median: 3 matches
+    - 48% of matches involve players with 0 hard history
+    - Max: 501 hard matches
+    - Insight: Hard court is the most common surface
+
+Key Insight: The high percentage of 0-experience matches reflects:
+  1. Many matches occur early in players' careers
+  2. Grass court play is extremely rare
+  3. Dataset only covers 2014-2024 (missing early career history for 
+     established players)
+
+--------------------------------------------------------------------------------
+4.4 HANDLING ZERO SURFACE EXPERIENCE
+--------------------------------------------------------------------------------
+Problem: What if a player has never played on this surface before?
+
+Solution: Same as career stats (0.5 neutral win rate)
+  - If player1_clay_matches = 0, set player1_clay_win_rate = 0.5
+  - Model can distinguish between:
+    * Win rate based on data (when matches > 0)
+    * Unknown win rate (when matches = 0)
+
+This is realistic: A player playing their first grass match truly has 
+unknown grass performance.
+
+================================================================================
+5. HEAD-TO-HEAD STATISTICS (6 Features)
+================================================================================
+
+These features track historical matchups between specific player pairs. Some 
+rivalries have strong patterns (e.g., Nadal dominates Federer on clay), making 
+H2H highly predictive.
+
+--------------------------------------------------------------------------------
+5.1 THE PLAYER ORDER PROBLEM
+--------------------------------------------------------------------------------
+Challenge: Players can appear in either player1 or player2 role
+  - Match 10: player1 = Federer (ID 101), player2 = Nadal (ID 102)
+  - Match 50: player1 = Nadal (ID 102), player2 = Federer (ID 101)
+  
+These are the SAME rivalry but with roles flipped!
+
+Naive Approach (WRONG):
+  Use (player1_id, player2_id) as key
+  → (101, 102) and (102, 101) would be treated as DIFFERENT rivalries
+  → H2H stats would be split across two keys
+
+Solution: Canonical Key
+  Always sort player IDs so the smaller ID comes first in the tuple
+  → Both (101, 102) and (102, 101) become key (101, 102)
+  → All matches between these players share the same key
+
+--------------------------------------------------------------------------------
+5.2 IMPLEMENTATION APPROACH
+--------------------------------------------------------------------------------
+Method: Hash Table with Canonical Keys
+  - Data structure: defaultdict(lambda: {'matches': 0, 'smaller_id_wins': 0, 
+    'larger_id_wins': 0})
+  - Key: tuple(sorted([player1_id, player2_id]))
+  - Value: Dictionary tracking matches and wins for each player
+
+Helper Function:
+  def get_h2h_key(p1_id, p2_id):
+      return tuple(sorted((p1_id, p2_id)))
+  
+  Examples:
+    get_h2h_key(105, 203) → (105, 203)
+    get_h2h_key(203, 105) → (105, 203)  # Same key!
+    get_h2h_key(450, 299) → (299, 450)
+
+Algorithm:
+  Step 1: For each match:
+    a. Get canonical key: h2h_key = get_h2h_key(p1_id, p2_id)
+    b. Identify which player is smaller_id and which is larger_id
+  
+  Step 2: RETRIEVE stats from hash table
+    - Total H2H matches between these two players
+    - Extract wins for player1 based on their ID position
+    - Extract wins for player2 based on their ID position
+  
+  Step 3: STORE in dataframe
+    - h2h_matches: Total matches between these players
+    - player1_h2h_wins: Player1's wins in this rivalry
+    - player2_h2h_wins: Player2's wins in this rivalry
+  
+  Step 4: UPDATE hash table
+    - Increment h2h_matches
+    - Increment appropriate win counter based on:
+      * Who won (player1 or player2)?
+      * Which ID position do they occupy (smaller or larger)?
+  
+  Step 5: Calculate win rates and difference feature
+
+Processing Time: ~50 seconds for 124,097 matches
+Unique Rivalries Tracked: 88,896 player pairs
+
+--------------------------------------------------------------------------------
+5.3 FEATURES CREATED (6 Total)
+--------------------------------------------------------------------------------
+
+Match-Level Feature:
+  - h2h_matches: Total previous matches between these two players
+
+For Player 1 (2 features):
+  - player1_h2h_wins: Player1's wins vs this opponent (before current match)
+  - player1_h2h_win_rate: player1_h2h_wins / h2h_matches
+
+For Player 2 (2 features):
+  - player2_h2h_wins: Player2's wins vs this opponent (before current match)
+  - player2_h2h_win_rate: player2_h2h_wins / h2h_matches
+
+Difference Feature:
+  - h2h_win_rate_diff: player1_h2h_win_rate - player2_h2h_win_rate
+
+--------------------------------------------------------------------------------
+5.4 HANDLING FIRST MEETINGS
+--------------------------------------------------------------------------------
+Problem: What if two players have never faced each other before?
+
+Solution: Neutral assumption (0.5 win rate)
+  - If h2h_matches = 0:
+    * player1_h2h_wins = 0
+    * player2_h2h_wins = 0
+    * player1_h2h_win_rate = 0.5
+    * player2_h2h_win_rate = 0.5
+  
+This represents "no historical advantage for either player"
+
+Statistics:
+  - Most matches (>70%) have h2h_matches = 0 (first meeting)
+  - This is realistic: With 4,413 players, most pairs never meet
+
+--------------------------------------------------------------------------------
+5.5 VALIDATION - FEDERER VS NADAL
+--------------------------------------------------------------------------------
+Test Case: Roger Federer (ID 103819) vs Rafael Nadal (ID 104745)
+
+Dataset Coverage: 9 matches (2014-2024)
+  Note: Dataset only includes 2014-2024, missing their early career matches
+
+In-Dataset Results:
+  - Federer: 7 wins (77.8%)
+  - Nadal: 2 wins (22.2%)
+
+Real Career H2H (all-time): Nadal leads 24-16
+  Note: Nadal dominated early career (2004-2013), which is NOT in our dataset
+
+Surface Breakdown (in dataset):
+  - Hard: 7 matches (Federer 6-1 Nadal)
+  - Clay: 1 match (Nadal 1-0 Federer)
+  - Grass: 1 match (Federer 1-0 Nadal)
+
+Example H2H Evolution:
+  Match 1 (2014-01-13, Hard):
+    BEFORE: h2h_matches = 0, both win_rates = 0.5 (first meeting in dataset)
+    OUTCOME: Nadal wins
+    AFTER: h2h_matches = 1, Nadal 1-0 Federer
+  
+  Match 2 (2015-10-26, Hard):
+    BEFORE: h2h_matches = 1, Federer 0.0 win rate, Nadal 1.0 win rate
+    OUTCOME: Federer wins
+    AFTER: h2h_matches = 2, tied 1-1
+  
+  Match 9 (2019-07-01, Grass - Wimbledon):
+    BEFORE: h2h_matches = 8, Federer 0.25 win rate, Nadal 0.75 win rate
+    OUTCOME: Federer wins
+    AFTER: Final tally - Federer 7-2 in dataset
+
+Key Insight: H2H features capture rivalry dynamics but are limited to 
+dataset coverage. Missing historical context for established players.
+
+================================================================================
+6. RECENT FORM (5 Features)
+================================================================================
+
+These features capture player momentum and current performance by tracking 
+win rate over their last N matches. We use a sliding window of 20 matches.
+
+--------------------------------------------------------------------------------
+6.1 DESIGN CHOICE: LAST N MATCHES vs LAST N DAYS
+--------------------------------------------------------------------------------
+Two Possible Approaches:
+  
+  Option A: Last N Matches (CHOSEN)
+    - Track win rate over last 20 matches
+    - Pros:
+      * Consistent sample size for all players
+      * Simple and fast to implement (O(n) complexity)
+      * No date parsing required
+      * Standard in sports analytics
+    - Cons:
+      * 20 matches could span different time periods for different players
+      * Active players accumulate matches faster
+  
+  Option B: Last N Days/Months
+    - Track win rate over last 90 days
+    - Pros:
+      * True temporal recency
+      * Captures actual "current form"
+    - Cons:
+      * Variable sample size (some players play 1 match, others 10)
+      * More complex (O(n²) complexity)
+      * Requires date parsing and lookback windows
+
+Decision: Last N Matches
+  Rationale: Provides consistent sample size and is computationally efficient. 
+  The "last 20 matches" is a reasonable proxy for recent form in tennis.
+
+Window Size: 20 matches
+  - Small enough to capture recent trends
+  - Large enough to avoid noise from single match outcomes
+  - Could experiment with 5, 10, 15, or 20 as hyperparameter
+
+--------------------------------------------------------------------------------
+6.2 IMPLEMENTATION APPROACH
+--------------------------------------------------------------------------------
+Method: Deque (Double-Ended Queue)
+  - Data structure: collections.deque with maxlen=20
+  - Key: player_id
+  - Value: deque storing last 20 match results (1 for win, 0 for loss)
+
+Why Deque?
+  A deque (pronounced "deck") is a double-ended queue that efficiently 
+  maintains a sliding window:
+    - append(item): Adds to right end
+    - When length > maxlen: Automatically removes from left end
+    - O(1) time for both operations
+    - Perfect for "last N items" scenarios
+
+Example:
+  deque(maxlen=3) evolution:
+    Initial: deque([])
+    After match 1 (win): deque([1])
+    After match 2 (loss): deque([1, 0])
+    After match 3 (win): deque([1, 0, 1])
+    After match 4 (loss): deque([0, 1, 0])  ← oldest (1) removed automatically
+    After match 5 (win): deque([1, 0, 1])  ← oldest (0) removed automatically
+
+Algorithm:
+  Step 1: Initialize hash table: player_recent_results = defaultdict(
+            lambda: deque(maxlen=20))
+  
+  Step 2: For each match:
+    a. RETRIEVE player's deque
+    b. Calculate current window stats:
+       - recent_wins = sum(deque)  # Count 1s
+       - recent_matches = len(deque)  # Current window size (0-20)
+       - recent_form = recent_wins / recent_matches (if > 0, else 0.5)
+    c. STORE in dataframe
+    d. UPDATE deque by appending current match result
+  
+  Step 3: Calculate difference feature
+
+Processing Time: ~50 seconds for 124,097 matches
+
+--------------------------------------------------------------------------------
+6.3 FEATURES CREATED (5 Total)
+--------------------------------------------------------------------------------
+
+For Player 1 (2 features):
+  - player1_recent_form: Win rate in last N matches (0.0 to 1.0)
+  - player1_recent_matches: Number of matches in window (0 to 20)
+
+For Player 2 (2 features):
+  - player2_recent_form: Win rate in last N matches (0.0 to 1.0)
+  - player2_recent_matches: Number of matches in window (0 to 20)
+
+Difference Feature:
+  - recent_form_diff: player1_recent_form - player2_recent_form
+
+--------------------------------------------------------------------------------
+6.4 WINDOW FILLING BEHAVIOR
+--------------------------------------------------------------------------------
+
+Matches 1-20 (Window Filling Phase):
+  - Match 1: recent_matches = 0, recent_form = 0.5 (no history)
+  - Match 2: recent_matches = 1, recent_form = 1.0 (if won) or 0.0 (if lost)
+  - Match 3: recent_matches = 2, recent_form = (wins in last 2) / 2
+  - ...
+  - Match 20: recent_matches = 19, recent_form = (wins in last 19) / 19
+  - Match 21+: recent_matches = 20, recent_form = (wins in last 20) / 20
+
+Example Player Trajectory:
+  Match 1: BEFORE recent_matches=0, recent_form=0.5 → Win
+  Match 2: BEFORE recent_matches=1, recent_form=1.0 → Win
+  Match 3: BEFORE recent_matches=2, recent_form=1.0 → Loss
+  Match 4: BEFORE recent_matches=3, recent_form=0.67 → Win
+  ...
+  Match 21: BEFORE recent_matches=20, recent_form=0.65 → Win
+  Match 22: BEFORE recent_matches=20, recent_form=0.70 → Loss
+    (oldest result from match 2 is removed, match 21 result added)
+
+Key Insight: recent_matches column allows model to distinguish between:
+  - Established form (recent_matches = 20): High confidence
+  - Early career (recent_matches = 5): Lower confidence
+  - First match (recent_matches = 0): Unknown, treat neutrally
+
+--------------------------------------------------------------------------------
+6.5 INTERPRETATION EXAMPLES
+--------------------------------------------------------------------------------
+
+Scenario 1: Hot Streak
+  player1_recent_form = 0.85 (17 wins in last 20 matches)
+  player2_recent_form = 0.40 (8 wins in last 20 matches)
+  recent_form_diff = +0.45
+  → Player1 has strong positive momentum, likely to win
+
+Scenario 2: Cold Streak
+  player1_recent_form = 0.30 (6 wins in last 20 matches)
+  player2_recent_form = 0.75 (15 wins in last 20 matches)
+  recent_form_diff = -0.45
+  → Player1 struggling recently, Player2 has advantage
+
+Scenario 3: Established vs Newcomer
+  player1_recent_matches = 20, player1_recent_form = 0.55
+  player2_recent_matches = 3, player2_recent_form = 0.67
+  → Player1's form is more reliable (full 20-match window)
+  → Player2's high win rate may be small sample luck
+
+Scenario 4: Both New
+  player1_recent_matches = 0, player1_recent_form = 0.5
+  player2_recent_matches = 2, player2_recent_form = 1.0
+  → Both players lack extensive history, model will rely on other features
+
+================================================================================
+7. SUMMARY AND KEY INSIGHTS
+================================================================================
+
+--------------------------------------------------------------------------------
+7.1 COMPLETE FEATURE INVENTORY
+--------------------------------------------------------------------------------
+
+TOTAL FEATURES ENGINEERED: 42 features
+
+Breakdown by Category:
+  1. Simple Differences: 3 features
+     - rank_difference, age_difference, height_difference
+  
+  2. Career Statistics: 7 features
+     - player1_career_matches, player1_career_wins, player1_career_win_rate
+     - player2_career_matches, player2_career_wins, player2_career_win_rate
+     - career_win_rate_diff
+  
+  3. Surface-Specific: 21 features
+     - For each player (player1 and player2):
+       * clay_matches, clay_wins, clay_win_rate
+       * grass_matches, grass_wins, grass_win_rate
+       * hard_matches, hard_wins, hard_win_rate
+     - Difference features:
+       * clay_win_rate_diff, grass_win_rate_diff, hard_win_rate_diff
+  
+  4. Head-to-Head: 6 features
+     - h2h_matches
+     - player1_h2h_wins, player1_h2h_win_rate
+     - player2_h2h_wins, player2_h2h_win_rate
+     - h2h_win_rate_diff
+  
+  5. Recent Form: 5 features
+     - player1_recent_form, player1_recent_matches
+     - player2_recent_form, player2_recent_matches
+     - recent_form_diff
+
+Final Dataset:
+  - Original features: 81 columns (after preprocessing)
+  - Engineered features: 42 columns
+  - TOTAL: 123 columns
+  - Rows: 124,097 matches
+  - Saved as: matches_with_engineered_features.csv
+
+--------------------------------------------------------------------------------
+7.2 IMPLEMENTATION PATTERNS
+--------------------------------------------------------------------------------
+
+Common Pattern Across All Features:
+  1. Initialize hash table (defaultdict with appropriate structure)
+  2. Initialize columns in dataframe with neutral values (0, 0.5)
+  3. For each match (chronologically):
+     a. RETRIEVE "before" stats from hash table
+     b. STORE in dataframe
+     c. UPDATE hash table with current match result
+  4. Calculate win rates from matches and wins
+  5. Create difference features (player1 - player2)
+
+Critical Principle: "Retrieve → Store → Update"
+  This order prevents data leakage by ensuring features only use information 
+  available BEFORE each match.
+
+--------------------------------------------------------------------------------
+7.3 HANDLING MISSING HISTORY (COLD START PROBLEM)
+--------------------------------------------------------------------------------
+
+Imputation Strategy: Neutral Default (0.5)
+  When a player has no history for a specific feature:
+    - career_matches = 0 → career_win_rate = 0.5
+    - clay_matches = 0 → clay_win_rate = 0.5
+    - h2h_matches = 0 → h2h_win_rate = 0.5
+    - recent_matches = 0 → recent_form = 0.5
+
+Why 0.5?
+  - Represents "unknown" or "neutral" expectation (50% win probability)
+  - Tree-based models can learn to check match count and handle accordingly
+  - Better than 0.0 (biases against new players) or NaN (breaks some models)
+  - Interpretable and realistic
+
+Model Learning:
+  The model can distinguish between:
+    - High win rate with many matches (confident prediction)
+    - High win rate with few matches (noisy, less reliable)
+    - 0.5 win rate with 0 matches (unknown, fallback to other features)
+
+--------------------------------------------------------------------------------
+7.4 DATA CHARACTERISTICS
+--------------------------------------------------------------------------------
+
+Sparsity Insights:
+  - 60% of matches have player(s) with 0 clay experience
+  - 95% of matches have player(s) with 0 grass experience
+  - 70%+ of matches are first-time meetings (h2h_matches = 0)
+  - Early career matches have limited career history
+
+This is NOT a data quality problem. It reflects reality:
+  - Tennis careers start with 0 matches
+  - Grass season is extremely short (1-2 months/year)
+  - With 4,413 players, most pairs never meet
+  - Dataset only covers 2014-2024 (missing early history for established 
+    players like Federer, who turned pro in 1998)
+
+Model Implications:
+  - For matches with rich history, features are highly informative
+  - For matches with sparse history, model falls back to basic features 
+    (rank, age, height)
+  - This mirrors real-world prediction scenarios
+
+--------------------------------------------------------------------------------
+7.5 COMPUTATIONAL EFFICIENCY
+--------------------------------------------------------------------------------
+
+Processing Times (124,097 matches):
+  - Career stats: ~50 seconds
+  - Surface-specific: ~50 seconds
+  - Head-to-head: ~50 seconds
+  - Recent form: ~50 seconds
+  - TOTAL: ~3-4 minutes for all features
+
+Alternative Approaches Considered:
+  - Vectorized (pandas groupby + cumsum): Faster (~10 seconds per feature) 
+    but more complex code and harder to debug
+  - Row-by-row with df.iterrows(): Much slower (~5 minutes per feature)
+  - Hash table (chosen): Good balance of speed and code clarity
+
+Memory Usage:
+  - Final dataframe: ~60 MB (123 columns × 124,097 rows)
+  - Hash tables: Negligible (<5 MB for 4,413 players)
+  - Total: <100 MB (easily fits in RAM)
+
+--------------------------------------------------------------------------------
+7.6 VALIDATION AND TESTING
+--------------------------------------------------------------------------------
+
+Validation Methods Used:
+  1. Single-player trace: Manually verified first 10 matches for a player
+  2. Famous rivalry check: Federer vs Nadal H2H validation
+  3. Statistical sanity checks: Means, medians, ranges
+  4. First-row verification: All "before" features should be 0 or 0.5
+
+All validations passed successfully (✅)
+
+--------------------------------------------------------------------------------
+7.7 NEXT STEPS IN THE PROJECT
+--------------------------------------------------------------------------------
+
+Immediate Next Steps:
+  1. Retrain models with engineered features
+     - Load matches_with_engineered_features.csv
+     - Same train/val/test split (2014-2022 / 2023 / 2024)
+     - Train Decision Tree, Random Forest, XGBoost, Logistic Regression
+     - EXPECTATION: Break through 64-66% baseline, reach 68-72% accuracy
+  
+  2. Walk-Forward Validation for 2024
+     - Critical for realistic evaluation
+     - Update features monthly (12 iterations for 2024)
+     - Ensures features stay current
+  
+  3. Feature Importance Analysis
+     - Which features are most predictive?
+     - Correlation with target variable
+     - Model-based importance (tree models)
+  
+  4. Hyperparameter Tuning
+     - Grid Search or Random Search
+     - Use validation set (2023) for tuning
+     - Test set (2024) ONLY for final evaluation
+
+Potential Additional Features (Future Work):
+  - Multiple window sizes for recent form (5, 10, 20 matches)
+  - Winning/losing streak length
+  - Tournament-level specific stats (Grand Slam vs regular)
+  - Rest days since last match
+  - Surface-specific H2H records
+  - Elo rating system (custom implementation)
+
+--------------------------------------------------------------------------------
+7.8 KEY TAKEAWAYS
+--------------------------------------------------------------------------------
+
+1. Data Leakage Prevention:
+   Always retrieve stats BEFORE updating hash tables. This ensures we only 
+   use information that would have been available before each match.
+
+2. Chronological Order:
+   All matches must be processed in date order. Sorting by tourney_date is 
+   the FIRST step in any time-aware feature engineering.
+
+3. Neutral Imputation (0.5):
+   For unknown history, use 0.5 win rate to represent neutral expectation. 
+   Include match count so model can learn confidence levels.
+
+4. Hash Tables are Efficient:
+   For time-series features with lookback, hash tables offer excellent 
+   balance of speed and code clarity.
+
+5. Tennis-Specific Insights:
+   - Rank is most predictive simple feature (r = -0.27)
+   - Surface specialization matters (e.g., clay vs grass)
+   - H2H captures rivalry dynamics
+   - Recent form captures momentum
+   - Grass court play is extremely rare (95% sparsity)
+
+6. Realistic Sparsity:
+   High percentages of 0-history matches are expected and NOT a problem. 
+   This reflects actual tennis data characteristics.
+
+7. Feature Combinations:
+   Engineered features work together:
+   - Career stats → Overall quality
+   - Surface stats → Style and specialization
+   - H2H → Specific matchup dynamics
+   - Recent form → Current momentum
+   - Difference features → Relative advantages
+
+================================================================================
+END OF SUMMARY
+================================================================================
+

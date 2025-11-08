@@ -17,6 +17,7 @@ venv/
 env/
 ENV/
 .venv
+datascience-2/
 
 # IDE
 .vscode/
