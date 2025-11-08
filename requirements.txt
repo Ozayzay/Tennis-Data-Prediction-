@@ -10,6 +10,7 @@ plotly==5.15.0
 
 # Machine Learning
 scikit-learn>=1.4.2
+xgboost>=2.0.0
 
 # Clustering Algorithms
 hdbscan>=0.8.36
