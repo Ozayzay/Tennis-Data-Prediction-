@@ -3,445 +3,286 @@
 **Author:** Ozafa Yousuf Mahmood  
 **Goal:** Predict the winner of professional tennis matches using **only pre-match information**, with a strong focus on **data leakage prevention**, **time-aware validation**, and **feature engineering** that reflects how tennis performance evolves over time.
 
-This repository is designed as a portfolio-grade project for Data Analyst / Data Scientist roles: it demonstrates practical work across data cleaning, missing-data strategy, time-series evaluation, feature engineering, model training/tuning, ensembling, and unsupervised analysis.
+This repository is designed as a **portfolio-grade** project for **Data Analyst / Data Scientist** roles: it demonstrates practical work across data cleaning, missing-data strategy, time-series evaluation, feature engineering, model training/tuning, ensembling, and unsupervised analysis.
+
+---
 
 ## Highlights (Why this project is worth reading)
 
-- Leakage-safe pipeline: removed post-match variables; engineered historical features with a strict GET → STORE → UPDATE pattern to ensure point-in-time correctness.
-- Time-aware evaluation: chronological splits; tuning with TimeSeriesSplit to avoid temporal leakage.
-- Domain-driven features: career stats, surface-conditioned stats, head-to-head rivalry features, recent form via deque.
-- Practical iteration: baselines → engineered features → ATP-only training/testing to reduce sparsity → hyperparameter tuning → ensembles.
-- Best model: Stacking ensemble with Random Forest meta-model achieved 66.1% test accuracy.
-- Unsupervised + anomaly work: PCA/KMeans clustering and Isolation Forest with careful interpretation.
+- **Leakage-safe pipeline design:** I aggressively removed post-match variables and engineered every historical feature using a strict **GET → STORE → UPDATE** pattern to ensure *no match can “predict itself.”*
+- **Time-aware evaluation:** Used **chronological splits** and moved tuning to **TimeSeriesSplit** after identifying why standard k-fold CV can leak future information in time-dependent sports data.
+- **Domain-driven feature engineering:** Built career stats, surface-conditioned stats, head-to-head rivalry features, and “recent form” using efficient hash-table and deque-based methods.
+- **Practical modeling iteration:** Baselines → engineered features → retraining strategy to reduce cold-start → **ATP-only training/testing** to reduce sparsity → hyperparameter tuning → ensembles.
+- **Best model:** **Stacking ensemble with RF meta-model** achieved **66.1%** test accuracy.
+- **Unsupervised + anomaly work:** PCA/KMeans clustering, silhouette analysis, cluster profiling, and Isolation Forest anomaly detection with careful interpretation (distinguishing “real anomalies” vs expected data artifacts).
+
+---
 
 ## Results (Test Accuracy)
 
-### Before Feature Engineering
+### Before Feature Engineering (baseline models)
+These runs used cleaned pre-match features and chronological evaluation:
 
-- Decision Tree: 62.0%
-- Random Forest: 61.5%
-- Logistic Regression: 62.6%
-- XGBoost: 62.2%
+- **Decision Tree:** 62.0%  
+- **Random Forest:** 61.5%  
+- **Logistic Regression:** 62.6%  
+- **XGBoost:** 62.2%
 
 ### After Feature Engineering + ATP-only Train/Test + RF GridSearchCV
+Key improvement came from reducing sparsity by focusing on ATP matches and properly tuning RF:
 
-- Random Forest (time-aware tuning): 65.58%
-- Logistic Regression: 65.13%
-- XGBoost: 63.56%
-- Decision Tree: 61.30%
+- **Random Forest (GridSearchCV + time-aware):** **65.58%** *(+1.5% absolute)*  
+- **Logistic Regression:** 65.13%  
+- **XGBoost:** 63.56%  
+- **Decision Tree:** 61.30%
 
 ### Ensembles
+- **Voting Ensemble (DT + RF + LR + XGB):** ~65.0%  
+- **Stacking Ensemble (meta = Random Forest):** **66.1%** *(best overall)*
 
-- Voting Ensemble (DT + RF + LR + XGB): ~65.0%
-- Stacking Ensemble (meta = Random Forest): 66.1% (best)
-
-### Quick Results Table
-
-| Model                          | Test Accuracy |
-| ------------------------------ | ------------- |
-| Decision Tree                  | 61.30%        |
-| Random Forest (tuned)          | 65.58%        |
-| Logistic Regression (scaled)   | 65.13%        |
-| XGBoost                        | 63.56%        |
-| Voting Ensemble (DT+RF+LR+XGB) | ~65.0%        |
-| Stacking (meta Random Forest)  | 66.10%        |
+---
 
 ## Problem Statement
 
-Given a match between Player 1 and Player 2, predict whether Player 1 wins using only pre-match information.
+Given a match between **Player 1** and **Player 2**, predict whether Player 1 wins using only information that is available **before the match starts**.
 
-Challenges:
+This is harder than it looks:
+- Tennis performance is **time-dependent** (rankings, form, surfaces).
+- Many high-signal variables are only known **after** the match (scores, minutes, break points, etc.) and must be removed to avoid leakage.
+- A large portion of tennis data is sparse (qualifiers, newcomers, surface history).
 
-- Tennis performance is time-dependent (rankings, form, surfaces).
-- Many high-signal variables are post-match and must be removed to avoid leakage.
-- Data sparsity for qualifiers/newcomers and certain surfaces.
+---
 
 ## Data Overview
 
-Raw inputs include ATP match results, player info, and rankings over multiple seasons. The pipeline treats prediction realistically: models must work even with limited player history and across seasons.
+The raw dataset includes:
+- A large **Matches** table (hundreds of thousands of rows, many columns),
+- Supporting tables such as **Players** and **Rankings**.
 
-## Methodology
+I treated this as a realistic prediction setting: the model must work even when a player has limited history, and must generalize across seasons.
 
-### 1) Data Cleaning & Preprocessing
+---
 
-- Dropped post-match and non-deployable columns (scores, minutes, in-match stats, seeds, etc.).
-- Missing data strategy:
-  - Tiny, random missingness: drop rows.
-  - Meaningful missingness: impute sentinel (e.g., max-rank + 1) and add a flag (e.g., unranked indicator).
-- Converted winner/loser tables to Player1 vs Player2 format to enable symmetric features like rank_diff, age_diff.
+## Methodology Overview
 
-### 2) Baseline Modeling
+### 1) Data Cleaning & Preprocessing (Leakage-first mindset)
+Key steps:
+- **Dropped post-match / non-deployable columns** (anything unavailable pre-match).
+- **Missing data strategy based on meaning:**
+  - If missingness is tiny and essentially random (e.g., very small age missingness), I dropped those rows.
+  - If missingness is meaningful (e.g., missing rank because a player is unranked), I **imputed with a sentinel** (e.g., max-rank + 1 style value) **and added a missingness flag** so the model can learn “unranked-ness” explicitly.
+- Converted the dataset from winner/loser format into a consistent **Player1 vs Player2** structure.
+  - This makes the pipeline model-friendly and enables symmetric features like *rank_diff, age_diff,* etc.
 
-Trained DT, RF, LR (with scaling), XGB to validate whether models alone solve performance; results clustered in low 60s, confirming feature signal is the bottleneck.
+### 2) Baseline Modeling (Pre-feature-engineering)
+I trained a baseline suite to test whether “better models” alone would solve the problem:
+- Decision Tree
+- Random Forest (with diagnostic tuning: max_features, depth, number of trees)
+- Logistic Regression (with scaling pipeline)
+- XGBoost
 
-### 3) Feature Engineering (Point-in-time correct)
+Outcome: performance was clustered around the low 60s. This validated the core hypothesis:
+> The bottleneck is **feature signal**, not model choice.
 
-Design principle: compute features as they exist before each match using GET → STORE → UPDATE order.
+---
 
-Implementation:
+## Feature Engineering (The core technical contribution)
 
-- Hash tables (dicts) for per-player lookups and canonical H2H keys.
-- Deques for rolling recent form windows (last 20 matches).
-- Chronological ordering via tournament date; validations for monotonic updates.
+### Design Principle: **Point-in-time correctness**
+All historical features are computed as they would exist *before* each match.
 
-Engineered groups:
+To guarantee this, every feature update follows the same pattern:
 
-- Difference features: rank_difference, age_difference, height_difference.
-- Career performance: career_matches, career_wins, career_win_rate per player; plus diffs; neutral prior 0.5 for no history.
-- Surface-specific: per-surface matches, wins, win_rate (hard/clay/grass; carpet included as explicit category); plus diffs.
-- Head-to-head: h2h_matches, per-player h2h_win_rate, h2h_win_rate_diff via canonical matchup keys.
-- Recent form: recent_form over last 20 matches per player; recent_form_diff. Chose Last N Matches over Last N Days to avoid calendar bias and ensure consistent sample size.
+1. **GET** historical stats for both players  
+2. **STORE** them into the current match row  
+3. **UPDATE** the stats using the current match result  
 
-### 4) Retraining Strategy
+If you UPDATE first, you leak the result into the feature itself.
 
-- Reduce cold-start via time windowing: accumulate history in earlier years; train/test in later years.
-- Train/test on ATP matches only to reduce sparsity; still use broader history to build stats.
+### Implementation Choices (Performance + clarity)
+- Used **hash tables (Python dicts)** keyed by player IDs and matchups for O(1) lookup.
+- Used **deques** for rolling “recent form” windows.
+- Verified chronological ordering by tournament date and enforced monotonic time behavior.
 
-### 5) Hyperparameter Tuning
+### Engineered Feature Groups
 
-- GridSearchCV (and RandomizedSearchCV when needed) with TimeSeriesSplit for time-aware tuning.
-- Tuned RF depth, trees, max_features; selected based on chronological validation.
+#### A) “Difference” Features (quick, high-signal)
+- rank_difference  
+- age_difference  
+- height_difference  
 
-### 6) Ensembling
+Why: many models benefit when the relative advantage is explicit rather than implied.
 
-- Voting: DT + RF + LR + XGB achieved ~65%.
-- Stacking: base models as above; meta model = Random Forest; passthrough=True so meta sees base predictions and original features → best at 66.1%.
+#### B) Career Performance Features (per player + diff)
+For each player:
+- career_matches, career_wins, career_win_rate  
+Plus:
+- career_win_rate_diff (P1 − P2)
 
-### 7) Unsupervised Analysis
+Cold-start handling:
+- If no history: default win_rate = **0.5** (neutral prior)
+- Also store match counts so the model understands confidence level.
 
-- PCA + KMeans across k; silhouette analysis and cluster profiling.
-- Clusters often reflect experience gaps and surface; global separation is weak (low silhouette), which is expected in mixed tennis contexts.
-- Mid-project fix: added carpet surface encoding to ensure complete surface representation (rare but explicit category).
+#### C) Surface-Specific Performance (Hard / Clay / Grass + diff)
+For each surface, per player:
+- matches, wins, win_rate  
+Plus diffs for each surface.
 
-### 8) Anomaly Detection
+Important discovery: **grass is extremely sparse** in historical context.
+- ~95% of players have **0 grass matches** in the tracked history window.
+This explains why surface features can be valuable but often default-heavy.
 
-- Isolation Forest on numeric pre-match features.
-- Many “rank anomalies” were explained by unranked sentinel values and entry types (WC/Q/DA); retained as realistic tournament structure.
-- Removed a small number of genuine physical outliers.
+#### D) Head-to-Head (H2H) Rivalry Features
+Tracked rivalry stats using a canonical matchup key:
+- `key = tuple(sorted([player1_id, player2_id]))`
 
-## Repository Structure
+Features:
+- h2h_matches
+- h2h_wins for each player
+- h2h win rates
+- h2h_win_rate_diff
 
-- notebooks/EDA_and_preprocessing.ipynb — cleaning, exploratory analysis, leakage-safe preprocessing
-- notebooks/feature_engineering.ipynb — engineered features (career/surface/H2H/recent form)
-- notebooks/ozafa_modeling_and_evaluation.ipynb — baselines, retraining, evaluation, ensembles
-- notebooks/ozafa_clustering_analysis_based_on_matches.ipynb — PCA/KMeans, clustering diagnostics and profiling
-- data/raw — source CSVs (ATP matches, players, rankings)
-- data/processed — model-ready CSVs (e.g., matches_with_engineered_features.csv)
-- results — feature importance, figures, and model artifacts
+Scale note: tens of thousands of unique rivalries, and many matches are first-time meetings (H2H = 0).
+
+Validation example:
+- Verified known matchups (e.g., Federer vs Nadal) to ensure rivalry counting logic is correct.
+
+#### E) Recent Form (Last 20 Matches)
+For each player, tracked last N results using a deque (N=20):
+- recent_matches (0–20)
+- recent_form (win rate in last 20)
+- recent_form_diff
+
+Why “Last N Matches” (not “Last N Days”):
+- Match frequency varies wildly by player, tournament type, and season.
+- Matches provide a consistent sample size and reduce calendar-based bias.
+
+---
+
+## Retraining Strategy (Solving sparsity + cold-start)
+
+After engineering, initial retraining showed only modest gains and sometimes more overfitting. I treated this as a signal-quality problem, not a failure.
+
+Key refinements:
+
+### 1) Reduce cold-start impact via time windowing
+- Built history from earlier years (to accumulate stats),
+- Trained and tested on later years where features are populated.
+
+### 2) Train/test on ATP matches only (while still using broader history to build stats)
+Qualification/lower-tier matches increase sparsity and distort the prediction target.
+Restricting training/testing to ATP matches made engineered features more usable and improved results meaningfully.
+
+---
+
+## Hyperparameter Tuning (GridSearchCV + Time-Aware CV)
+
+### Why time-aware tuning matters
+Standard k-fold CV can produce overly optimistic or inconsistent estimates in time-dependent data because the model may train on “future” matches relative to a validation fold.
+
+During tuning, I found that:
+- Dataset ordering and split logic can materially affect outcomes.
+- Time-series validation better matches the real task: **predict the future from the past.**
+
+### What I did
+- Used **GridSearchCV** (and moved toward **RandomizedSearchCV** when grid size became expensive).
+- Switched evaluation to **TimeSeriesSplit** to preserve temporal ordering during tuning.
+- Tuned Random Forest parameters (depth, trees, max_features, etc.) and selected configs based on time-aware validation behavior.
+
+---
+
+## Ensembling (Voting vs Stacking)
+
+### Voting Ensemble
+Combined DT + RF + LR + XGB to reduce variance.
+Result: ~65% (comparable to the tuned RF).
+
+### Stacking Ensemble (Best Model)
+I implemented a **StackingClassifier** with:
+- Base learners: DT, RF, LR (scaled pipeline), XGB
+- Meta learner: **Random Forest**
+- `passthrough=True` so the meta-model sees both base predictions and original features.
+
+Why stacking wins:
+- Voting combines models with fixed logic.
+- Stacking **learns** how to weight each model differently across feature space.
+
+**Best test result:** **66.1%**
+
+---
+
+## Unsupervised Analysis (Clustering)
+
+### PCA + KMeans
+I explored whether match contexts naturally cluster without using the label.
+
+Key outcomes:
+- Silhouette scores were generally low (weak global separation).
+- Some K=2 solutions were imbalanced, suggesting KMeans was capturing edge cases rather than strong natural groupings.
+- Cluster profiling (feature means per cluster) revealed meaningful patterns:
+  - Clusters often reflected **experience gaps** (career matches) and **surface**.
+
+### “Mid-project fix”: Carpet surface encoding
+I caught a surface-encoding issue and added the missing category.
+Observation:
+- Carpet matches are extremely rare (~0.4%), so adding it can destabilize K=4 clustering.
+This was a good example of using unsupervised diagnostics to find feature representation issues.
+
+---
+
+## Anomaly Detection (Isolation Forest)
+
+Goal: detect unusual matches and verify whether they are real anomalies or explainable artifacts.
+
+What I found:
+- Many “rank anomalies” were not real anomalies—they were expected outcomes of **unranked-player rank imputation** (sentinel rank values).
+- Some flagged matches were explained by entry mechanics:
+  - Wildcards (WC), Qualifiers (Q), and Direct Acceptance behavior in weaker draws can create extreme rank differences.
+- I **kept** these rows because they reflect real tournament structure.
+- I did identify a small number of genuine physical outliers (e.g., extreme height values) and removed them.
+
+This section demonstrates judgment: anomaly detection is only useful if you interpret it correctly.
+
+---
+
+## Repository Structure (Typical)
+- `EDA_and_preprocessing.ipynb` — cleaning, exploratory analysis, leakage-safe preprocessing
+- `feature_engineering.ipynb` — engineered features (career/surface/H2H/recent form)
+- `ozafa_modeling_and_evaluation.ipynb` — baselines, retraining, evaluation
+- `ozafa_clustering_analysis_based_on_matches.ipynb` — PCA/KMeans, clustering diagnostics, cluster profiling
+- (Optional) `df_tail.csv` — sample output snapshot / debug artifact
+
+---
 
 ## How to Run (Setup & Reproducibility)
 
-### Prerequisites
-
-- Python 3.10+
-- Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Reproduce Modeling
-
-1. Ensure processed dataset exists: data/processed/matches_with_engineered_features.csv
-2. Open notebooks/ozafa_modeling_and_evaluation.ipynb and run sequentially.
-3. Optional: adjust year splits in the notebook’s split section for different validation windows.
-
-### Quick Start (CLI)
-
-Use VS Code’s notebook runner or run cells sequentially. To reproduce results quickly, focus on `notebooks/ozafa_modeling_and_evaluation.ipynb` after ensuring `data/processed/matches_with_engineered_features.csv` exists.
-
-1. Clone
-
+1) **Clone**
 ```bash
 git clone https://github.com/Ozayzay/Tennis-Data-Prediction-
 cd Tennis-Data-Prediction-
 ```
 
-## Results & Figures
-
-- Feature importance CSV: results/baseline_dt_feature_importance.csv (rank_difference is dominant in baseline DT).
-- Clustering and sparsity/completeness visualizations can be exported from the notebooks to results/figures.
-  - If specific figure files are finalized, add their filenames here for showcase.
-
-## Future Work
-
-- ELO or Glicko-style dynamic ratings integrated into feature set.
-  Source: Jeff Sackmann ATP dataset (matches, players, rankings).
-- Player-specific fatigue/injury proxies; travel schedules.
-- Tournament-level features (draw strength, altitude, indoor/outdoor) and richer contextual variables.
-- Calibrated probabilities and betting-odds comparison.
-- Dropped post-match and non-deployable columns (scores, minutes, in-match stats) to prevent leakage.
-- Removed high-missingness or redundant fields (e.g., seeds) to reduce noise and improve robustness.
-
-## License
-
-This is a personal portfolio project. Please do not redistribute raw data files that may be subject to external licensing.
-
----
-
----
-
----
-
-## 🚀 Project Structure
-
-```
-
-### Quick Reproduce (Best Model)
-
-1) Open `notebooks/ozafa_modeling_and_evaluation.ipynb`
-2) Run cells:
-   - Load data (Step 1)
-   - Filter ATP-only and split by `tourney_date` (Steps 1–3)
-   - Train base models (Step 4)
-   - Train Voting (Step 5) and Stacking (Step 6)
-   - Evaluate (Step 7) → prints accuracy table; best stacking ≈ 66.1%
-
-Outputs: accuracy summary, predictions for each split, and `results/baseline_dt_feature_importance.csv`.
-project/
-├── data/
-│   ├── raw/                                    # Original CSV files from ATP database
-│   └── processed/                              # Cleaned and transformed data
-│       ├── matches_cleaned_columns_dropped.csv # After removing leakage features
-
-Example figures to include for recruiters:
-- Correlation heatmap (from `EDA_and_preprocessing.ipynb`)
-- PCA + KMeans cluster plot (from `ozafa_clustering_analysis_based_on_matches.ipynb`)
-- Top-15 feature importance bar chart (from `ozafa_modeling_and_evaluation.ipynb`)
-│       ├── matches_final_with_player_context.csv   # Encoded with IDs/names
-│       └── matches_final_without_player_context.csv # Model-ready dataset
-├── notebooks/
-│   ├── EDA_and_preprocessing.ipynb            # Data cleaning and preprocessing
-│   ├── 02_feature_engineering.ipynb           # Feature creation and selection
-│   └── 03_modeling_and_evaluation.ipynb       # Model training and evaluation
-├── results/
-<details>
-<summary>Deep Dive: EDA, Cleaning, and Pipeline Details</summary>
-
-This section collapses extended tables and explanations so the main README stays skimmable.
-
-#### Summary of Preprocessing Pipeline
-- Load 2014–2024 ATP matches (Main + Challenger/Qual), players, rankings
-- Drop leakage (scores, minutes, in-match stats) and identifiers
-- Clean missing values (rank sentinel + flag, country-median heights, direct entries)
-- Reframe to Player1/Player2 with balanced target via random flip
-- One-hot encode categorical features; control dimensionality
-- Save model-ready dataset in `data/processed/`
-
-#### Saved Datasets
-- `matches_cleaned_columns_dropped.csv` — after dropping leakage columns
-- `matches_final_with_player_context.csv` — encoded with player context
-- `matches_final_without_player_context.csv` — model-ready dataset
-
-#### Notes on Encoding Consistency
-- For linear models: used `drop_first=True` to avoid multicollinearity
-- For clustering diagnostics: kept full one-hot to interpret surfaces (including carpet)
-
-</details>
-│   └── models/                                # Trained model files
-├── README.md                                  # This file (serves as final report)
-├── requirements.txt                           # Python dependencies
-└── .gitignore                                 # Git ignore rules
-```
-
-**Note:** We're using a notebook-focused approach with clear separation of concerns: preprocessing → feature engineering → modeling.
-
----
-
-## 🛠️ Setup Instructions
-
-### Prerequisites
-
-- Python 3.8 or higher
-- pip package manager
-- Git
-
-### Installation
-
-1. **Clone the repository**
-
+2) Create environment
 ```bash
-git clone [your-repo-url]
-cd project
+python -m venv .venv
+source .venv/bin/activate  # macOS/Linux
+# .venv\\Scripts\\activate   # Windows
 ```
 
-2. **Create a virtual environment** (recommended)
+3) Install dependencies
 
-```bash
-python -m venv venv
-source venv/bin/activate  # On macOS/Linux
-# OR
-venv\Scripts\activate  # On Windows
-```
-
-3. **Install dependencies**
-
+If you have a requirements.txt:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Download the data**
-   - Place CSV files in `data/raw/`
-   - Files can be obtained from [Jeff Sackmann's GitHub](https://github.com/JeffSackmann/tennis_atp)
+If not, install core packages:
+```bash
+pip install pandas numpy scikit-learn matplotlib seaborn xgboost jupyter
+```
 
----
+4) Run notebooks
+```bash
+jupyter notebook
+```
 
-## 📈 Methodology
-
-### 1. Data Preprocessing & EDA
-
-#### **A. Data Loading**
-
-**Loaded Data Sources**:
-
-- **ATP Players** (`atp_players.csv`): 65,989 players with biographical data
-  - Key observation: 27% missing DOB, 90% missing height
-  - Strategy: Will impute/handle missing values when merging with match data
-- **ATP Rankings** (`atp_rankings_current.csv`): 92,341 ranking records
-
-  - Date range: 2024-01-01 to 2024-12-30
-  - Weekly snapshots of ATP rankings
-  - No missing values
-
-- **Match Data**: Combined Main Tour + Challenger/Qualification matches
-  - Years: 2014-2024 (11 years)
-  - Total matches loaded: 124,429
-
-#### **B. Exploratory Data Analysis**
-
-**Initial Data Quality Assessment**:
-
-- Visualized ranking distributions (right-skewed, most players ranked 200-1000)
-- Visualized ranking points distributions (exponential decay - top players have disproportionately more points)
-- Analyzed missing value patterns across all features
-- Key finding: Futures matches had ~40% missing match statistics → excluded from dataset
-
-**Missing Value Analysis** (% of total data):
-
-| Feature                             | Missing %  | Notes                                         |
-| ----------------------------------- | ---------- | --------------------------------------------- |
-| `w_ace`, `w_df`, etc. (match stats) | ~40%       | Futures matches lack statistics               |
-| `winner_seed`, `loser_seed`         | 54%, 73%   | Only for seeded players                       |
-| `winner_entry`, `loser_entry`       | 84%, 73%   | NaN means "Direct" entry                      |
-| `winner_ht`, `loser_ht`             | 4.3%, 9.0% | Height data incomplete                        |
-| `winner_rank`, `loser_rank`         | 0.8%, 3.3% | Unranked players (no points in last 52 weeks) |
-
----
-
-#### **C. Feature Removal - Preventing Information Leakage**
-
-**Dropped 25 columns** (reduced from 49 → 24 columns):
-
-| Category             | Columns Dropped                                                    | Reason                                       |
-| -------------------- | ------------------------------------------------------------------ | -------------------------------------------- |
-| **Seed columns**     | `winner_seed`, `loser_seed`                                        | Redundant with ATP rank                      |
-| **Identifiers**      | `tourney_id`, `match_num`, `tourney_name`                          | Unique row IDs; not generalizable            |
-| **Match outcomes**   | `score`, `minutes`                                                 | Known only after match (information leakage) |
-| **Match statistics** | `w_ace`, `w_df`, `w_svpt`, `w_1stIn`, `w_1stWon`, `l_*` (18 total) | In-match stats; not predictive features      |
-
-**Remaining features** (24 columns):
-
-- Player attributes: `id`, `name`, `hand`, `ht`, `age`, `ioc`, `rank`, `entry`
-- Match context: `surface`, `tourney_level`, `round`, `best_of`, `draw_size`, `tourney_date`
-
----
-
-#### **D. Data Cleaning - Handling Missing Values**
-
-Applied domain-driven imputation strategies:
-
-| Feature                                      | Missing %  | Strategy                                                               | Outcome                                                                    |
-| -------------------------------------------- | ---------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **`surface`**                                | 0.04%      | Dropped rows                                                           | -53 rows (negligible)                                                      |
-| **`winner_entry`/`loser_entry`**             | 84%/73%    | Imputed with `'Direct'`                                                | No flag needed (not missing at random - NaN explicitly means direct entry) |
-| **`winner_ht`/`loser_ht`**                   | 4.3%/9.0%  | 1. Imputed with **country median height**<br>2. Dropped remaining NaNs | -165 rows after imputation                                                 |
-| **`winner_age`, `loser_age`, `hand`, `ioc`** | <0.1% each | Dropped rows                                                           | -114 rows (minimal data loss)                                              |
-| **`winner_rank`/`loser_rank`**               | 0.8%/3.1%  | Imputed with **max_rank + 1 (2258)**<br>Created `*_rank_imputed` flags | 975 winners, 3851 losers flagged                                           |
-| **`*_rank_points`**                          | 0.8%/3.3%  | Dropped columns                                                        | Weak correlation (-0.4) with rank; rank is more informative                |
-
-**Final Clean Dataset**: **124,097 matches** (99.7% retention rate)
-
-**Rationale for Rank Imputation**:
-
-- Players without rankings haven't won points in the past 52 weeks (per ATP rules)
-- Imputing with `max_rank + 1` treats them as "worse than the worst-ranked player"
-- Flag column alerts model: "this rank is uncertain"
-
----
-
-#### **E. Data Reframing - Winner/Loser → Player1/Player2**
-
-**Problem**: Original data format creates information leakage
-
-- Each row: `winner_*` vs `loser_*` → model learns "person in winner column always wins"
-
-**Solution**: Randomly assign players to `player1` or `player2`
-
-**Implementation**:
-
-1. Set random seed (`np.random.seed(89)`) for reproducibility
-2. Create `flip` column: random binary (0 or 1) for each match
-3. Use **vectorized approach** (`np.where`) for speed:
-   - When `flip=1`: winner → player1, loser → player2
-   - When `flip=0`: loser → player1, winner → player2
-4. Target variable: `player1_won = flip`
-
-**Result**:
-
-- Perfectly balanced dataset: **50.16% class 1**, **49.84% class 0**
-- No information leakage: model treats both players symmetrically
-- Fast execution: vectorized operations (seconds vs minutes with `iterrows()`)
-
-**New Column Structure**:
-
-- `player1_*`: rank, rank_imputed, hand, height, age, ioc, entry
-- `player2_*`: rank, rank_imputed, hand, height, age, ioc, entry
-- `player1_won`: binary target (0 or 1)
-- Match context: `surface`, `tourney_level`, `round`, `best_of`, `draw_size`, `tourney_date`
-
----
-
-#### **F. Dimensionality Control - Dropping Country Codes**
-
-**Dropped**: `player1_ioc`, `player2_ioc` (country codes)
-
-**Rationale**:
-
-- Each has ~150 unique values → would create **300+ sparse binary columns**
-- **Curse of dimensionality**: Too many features relative to samples
-- **Overfitting risk**: Model might memorize country patterns instead of learning tennis dynamics
-- **Computational cost**: Slower training and inference
-
-**Future consideration**: Can revisit in feature engineering as:
-
-- Grouped by region (Europe, Americas, Asia, etc.)
-- Top-N countries only
-- "Home advantage" feature (player from tournament's host country)
-
----
-
-#### **G. Categorical Encoding - One-Hot Encoding**
-
-Applied `pd.get_dummies(drop_first=True)` to **7 categorical features**:
-
-| Feature         | Unique Values | Description                                                                     |
-| --------------- | ------------- | ------------------------------------------------------------------------------- |
-| `player1_hand`  | 3             | R (Right), L (Left), U (Unknown)                                                |
-| `player2_hand`  | 3             | R, L, U                                                                         |
-| `player1_entry` | ~6            | Direct, Q (Qualifier), WC (Wild Card), LL (Lucky Loser), PR (Protected Ranking) |
-| `player2_entry` | ~6            | Same as above                                                                   |
-| `surface`       | 4             | Hard, Clay, Grass, Carpet                                                       |
-| `tourney_level` | 5             | G (Grand Slam), M (Masters), A (ATP Tour), C (Challenger), D (Davis Cup)        |
-| `round`         | ~8            | F (Final), SF (Semi-Final), QF, R16, R32, R64, R128, RR                         |
-
-**Result**: **23 → 81 columns** (manageable expansion)
-
-**Why `drop_first=True`?**
-
-- Avoids **multicollinearity** (perfect correlation between features)
-- Example: If surface has 3 values (Hard, Clay, Grass) and we create 3 binary columns:
-  - If `surface_Clay=0` and `surface_Grass=0`, then it must be Hard
-  - Third column is redundant (perfectly predictable from the other two)
-- Dropping one category creates **reference category** (baseline for model interpretation)
-
----
