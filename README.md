@@ -1,87 +1,213 @@
-# ATP Tennis Match Outcome Prediction
+# Tennis Match Outcome Prediction (ATP) — End-to-End Data Science Pipeline
 
-**CMPT 459 Data Mining - Fall 2025**  
-**Instructor:** Martin Ester | **TA:** Ethan Do
+**Author:** Ozafa Yousuf Mahmood  
+**Goal:** Predict the winner of professional tennis matches using **only pre-match information**, with a strong focus on **data leakage prevention**, **time-aware validation**, and **feature engineering** that reflects how tennis performance evolves over time.
+
+This repository is designed as a portfolio-grade project for Data Analyst / Data Scientist roles: it demonstrates practical work across data cleaning, missing-data strategy, time-series evaluation, feature engineering, model training/tuning, ensembling, and unsupervised analysis.
+
+## Highlights (Why this project is worth reading)
+
+- Leakage-safe pipeline: removed post-match variables; engineered historical features with a strict GET → STORE → UPDATE pattern to ensure point-in-time correctness.
+- Time-aware evaluation: chronological splits; tuning with TimeSeriesSplit to avoid temporal leakage.
+- Domain-driven features: career stats, surface-conditioned stats, head-to-head rivalry features, recent form via deque.
+- Practical iteration: baselines → engineered features → ATP-only training/testing to reduce sparsity → hyperparameter tuning → ensembles.
+- Best model: Stacking ensemble with Random Forest meta-model achieved 66.1% test accuracy.
+- Unsupervised + anomaly work: PCA/KMeans clustering and Isolation Forest with careful interpretation.
+
+## Results (Test Accuracy)
+
+### Before Feature Engineering
+
+- Decision Tree: 62.0%
+- Random Forest: 61.5%
+- Logistic Regression: 62.6%
+- XGBoost: 62.2%
+
+### After Feature Engineering + ATP-only Train/Test + RF GridSearchCV
+
+- Random Forest (time-aware tuning): 65.58%
+- Logistic Regression: 65.13%
+- XGBoost: 63.56%
+- Decision Tree: 61.30%
+
+### Ensembles
+
+- Voting Ensemble (DT + RF + LR + XGB): ~65.0%
+- Stacking Ensemble (meta = Random Forest): 66.1% (best)
+
+### Quick Results Table
+
+| Model                          | Test Accuracy |
+| ------------------------------ | ------------- |
+| Decision Tree                  | 61.30%        |
+| Random Forest (tuned)          | 65.58%        |
+| Logistic Regression (scaled)   | 65.13%        |
+| XGBoost                        | 63.56%        |
+| Voting Ensemble (DT+RF+LR+XGB) | ~65.0%        |
+| Stacking (meta Random Forest)  | 66.10%        |
+
+## Problem Statement
+
+Given a match between Player 1 and Player 2, predict whether Player 1 wins using only pre-match information.
+
+Challenges:
+
+- Tennis performance is time-dependent (rankings, form, surfaces).
+- Many high-signal variables are post-match and must be removed to avoid leakage.
+- Data sparsity for qualifiers/newcomers and certain surfaces.
+
+## Data Overview
+
+Raw inputs include ATP match results, player info, and rankings over multiple seasons. The pipeline treats prediction realistically: models must work even with limited player history and across seasons.
+
+## Methodology
+
+### 1) Data Cleaning & Preprocessing
+
+- Dropped post-match and non-deployable columns (scores, minutes, in-match stats, seeds, etc.).
+- Missing data strategy:
+  - Tiny, random missingness: drop rows.
+  - Meaningful missingness: impute sentinel (e.g., max-rank + 1) and add a flag (e.g., unranked indicator).
+- Converted winner/loser tables to Player1 vs Player2 format to enable symmetric features like rank_diff, age_diff.
+
+### 2) Baseline Modeling
+
+Trained DT, RF, LR (with scaling), XGB to validate whether models alone solve performance; results clustered in low 60s, confirming feature signal is the bottleneck.
+
+### 3) Feature Engineering (Point-in-time correct)
+
+Design principle: compute features as they exist before each match using GET → STORE → UPDATE order.
+
+Implementation:
+
+- Hash tables (dicts) for per-player lookups and canonical H2H keys.
+- Deques for rolling recent form windows (last 20 matches).
+- Chronological ordering via tournament date; validations for monotonic updates.
+
+Engineered groups:
+
+- Difference features: rank_difference, age_difference, height_difference.
+- Career performance: career_matches, career_wins, career_win_rate per player; plus diffs; neutral prior 0.5 for no history.
+- Surface-specific: per-surface matches, wins, win_rate (hard/clay/grass; carpet included as explicit category); plus diffs.
+- Head-to-head: h2h_matches, per-player h2h_win_rate, h2h_win_rate_diff via canonical matchup keys.
+- Recent form: recent_form over last 20 matches per player; recent_form_diff. Chose Last N Matches over Last N Days to avoid calendar bias and ensure consistent sample size.
+
+### 4) Retraining Strategy
+
+- Reduce cold-start via time windowing: accumulate history in earlier years; train/test in later years.
+- Train/test on ATP matches only to reduce sparsity; still use broader history to build stats.
+
+### 5) Hyperparameter Tuning
+
+- GridSearchCV (and RandomizedSearchCV when needed) with TimeSeriesSplit for time-aware tuning.
+- Tuned RF depth, trees, max_features; selected based on chronological validation.
+
+### 6) Ensembling
+
+- Voting: DT + RF + LR + XGB achieved ~65%.
+- Stacking: base models as above; meta model = Random Forest; passthrough=True so meta sees base predictions and original features → best at 66.1%.
+
+### 7) Unsupervised Analysis
+
+- PCA + KMeans across k; silhouette analysis and cluster profiling.
+- Clusters often reflect experience gaps and surface; global separation is weak (low silhouette), which is expected in mixed tennis contexts.
+- Mid-project fix: added carpet surface encoding to ensure complete surface representation (rare but explicit category).
+
+### 8) Anomaly Detection
+
+- Isolation Forest on numeric pre-match features.
+- Many “rank anomalies” were explained by unranked sentinel values and entry types (WC/Q/DA); retained as realistic tournament structure.
+- Removed a small number of genuine physical outliers.
+
+## Repository Structure
+
+- notebooks/EDA_and_preprocessing.ipynb — cleaning, exploratory analysis, leakage-safe preprocessing
+- notebooks/feature_engineering.ipynb — engineered features (career/surface/H2H/recent form)
+- notebooks/ozafa_modeling_and_evaluation.ipynb — baselines, retraining, evaluation, ensembles
+- notebooks/ozafa_clustering_analysis_based_on_matches.ipynb — PCA/KMeans, clustering diagnostics and profiling
+- data/raw — source CSVs (ATP matches, players, rankings)
+- data/processed — model-ready CSVs (e.g., matches_with_engineered_features.csv)
+- results — feature importance, figures, and model artifacts
+
+## How to Run (Setup & Reproducibility)
+
+### Prerequisites
+
+- Python 3.10+
+- Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Reproduce Modeling
+
+1. Ensure processed dataset exists: data/processed/matches_with_engineered_features.csv
+2. Open notebooks/ozafa_modeling_and_evaluation.ipynb and run sequentially.
+3. Optional: adjust year splits in the notebook’s split section for different validation windows.
+
+### Quick Start (CLI)
+
+Use VS Code’s notebook runner or run cells sequentially. To reproduce results quickly, focus on `notebooks/ozafa_modeling_and_evaluation.ipynb` after ensuring `data/processed/matches_with_engineered_features.csv` exists.
+
+1. Clone
+
+```bash
+git clone https://github.com/Ozayzay/Tennis-Data-Prediction-
+cd Tennis-Data-Prediction-
+```
+
+## Results & Figures
+
+- Feature importance CSV: results/baseline_dt_feature_importance.csv (rank_difference is dominant in baseline DT).
+- Clustering and sparsity/completeness visualizations can be exported from the notebooks to results/figures.
+  - If specific figure files are finalized, add their filenames here for showcase.
+
+## Future Work
+
+- ELO or Glicko-style dynamic ratings integrated into feature set.
+  Source: Jeff Sackmann ATP dataset (matches, players, rankings).
+- Player-specific fatigue/injury proxies; travel schedules.
+- Tournament-level features (draw strength, altitude, indoor/outdoor) and richer contextual variables.
+- Calibrated probabilities and betting-odds comparison.
+- Dropped post-match and non-deployable columns (scores, minutes, in-match stats) to prevent leakage.
+- Removed high-missingness or redundant fields (e.g., seeds) to reduce noise and improve robustness.
+
+## License
+
+This is a personal portfolio project. Please do not redistribute raw data files that may be subject to external licensing.
 
 ---
 
-## 👥 Team Members
-
-- [Your Name Here]
-- [Teammate Name Here]
-
 ---
-
-## 📋 Project Overview
-
-This project analyzes ATP tennis match data to predict match outcomes using machine learning and data mining techniques. We explore relationships between player statistics, surface types, and match results to build an accurate prediction model.
-
-### 🎯 Research Questions
-
-1. **Match Outcome Prediction**: Given player and match features, can we accurately predict who will win in a head-to-head match?
-
-2. **Feature Importance**: Which factors are the most predictive of match outcomes?
-
-3. **Custom ELO System**: Does a custom Elo-based rating system provide more accurate predictions than the official ATP/WTA ranking points system?
-
----
-
-## 📊 Dataset
-
-**Source:** [Jeff Sackmann's ATP Tennis Database](https://github.com/JeffSackmann/tennis_atp/tree/master)
-
-### Dataset Statistics
-
-| Table        | Rows      | Columns | Description                            |
-| ------------ | --------- | ------- | -------------------------------------- |
-| **Matches**  | 124,097\* | 77      | Match results with detailed statistics |
-| **Rankings** | 92,341    | 4       | Current ATP rankings (2024)            |
-| **Players**  | 65,989    | 8       | Player biographical information        |
-
-\*After preprocessing and cleaning (originally 124,429 matches from 2014-2024)
-
-### Data Scope Decision
-
-**Temporal Range**: 2014-2024 (11 years)
-
-- **Training Data**: 2014-2022 (9 years)
-- **Validation Data**: 2023 (1 year)
-- **Test Data**: 2024 (1 year)
-
-**Match Types Included**:
-
-- ✅ Main Tour matches (~30,000 matches)
-- ✅ Challenger/Qualification matches (~94,000 matches)
-- ❌ Futures matches (excluded due to poor data quality - missing match statistics)
-- ❌ Pre-2014 data (excluded to focus on modern tennis dynamics)
-
-### Key Features
-
-- **Match Context**: Surface (Clay/Hard/Grass/Carpet), draw size, tournament level, date, round, best of (3 or 5 sets)
-- **Player Attributes**: Rankings, age, height, handedness, entry type (Direct/Qualifier/Wild Card)
-- **Target Variable**: `player1_won` (binary: 0 or 1)
-
-### Rationale for Dataset Selection
-
-We selected this dataset because:
-
-- **Rich Features**: Extensive contextual information including player rankings, surfaces, and tournament details
-- **Large Sample Size**: 124,000+ matches provide robust training data
-- **Real-World Application**: Tennis analytics is a growing field with practical applications in sports betting and coaching
-- **Domain Relevance**: Clean binary outcomes, balanced data, and well-documented features make it ideal for supervised learning
-- **Feature Engineering Opportunities**: Surface-specific performance, head-to-head records, and ELO ratings can be derived
-- **Temporal Validation**: Chronological data allows for realistic time-based train/test splits
 
 ---
 
 ## 🚀 Project Structure
 
 ```
+
+### Quick Reproduce (Best Model)
+
+1) Open `notebooks/ozafa_modeling_and_evaluation.ipynb`
+2) Run cells:
+   - Load data (Step 1)
+   - Filter ATP-only and split by `tourney_date` (Steps 1–3)
+   - Train base models (Step 4)
+   - Train Voting (Step 5) and Stacking (Step 6)
+   - Evaluate (Step 7) → prints accuracy table; best stacking ≈ 66.1%
+
+Outputs: accuracy summary, predictions for each split, and `results/baseline_dt_feature_importance.csv`.
 project/
 ├── data/
 │   ├── raw/                                    # Original CSV files from ATP database
 │   └── processed/                              # Cleaned and transformed data
 │       ├── matches_cleaned_columns_dropped.csv # After removing leakage features
+
+Example figures to include for recruiters:
+- Correlation heatmap (from `EDA_and_preprocessing.ipynb`)
+- PCA + KMeans cluster plot (from `ozafa_clustering_analysis_based_on_matches.ipynb`)
+- Top-15 feature importance bar chart (from `ozafa_modeling_and_evaluation.ipynb`)
 │       ├── matches_final_with_player_context.csv   # Encoded with IDs/names
 │       └── matches_final_without_player_context.csv # Model-ready dataset
 ├── notebooks/
@@ -89,7 +215,29 @@ project/
 │   ├── 02_feature_engineering.ipynb           # Feature creation and selection
 │   └── 03_modeling_and_evaluation.ipynb       # Model training and evaluation
 ├── results/
-│   ├── figures/                               # Visualizations and plots
+<details>
+<summary>Deep Dive: EDA, Cleaning, and Pipeline Details</summary>
+
+This section collapses extended tables and explanations so the main README stays skimmable.
+
+#### Summary of Preprocessing Pipeline
+- Load 2014–2024 ATP matches (Main + Challenger/Qual), players, rankings
+- Drop leakage (scores, minutes, in-match stats) and identifiers
+- Clean missing values (rank sentinel + flag, country-median heights, direct entries)
+- Reframe to Player1/Player2 with balanced target via random flip
+- One-hot encode categorical features; control dimensionality
+- Save model-ready dataset in `data/processed/`
+
+#### Saved Datasets
+- `matches_cleaned_columns_dropped.csv` — after dropping leakage columns
+- `matches_final_with_player_context.csv` — encoded with player context
+- `matches_final_without_player_context.csv` — model-ready dataset
+
+#### Notes on Encoding Consistency
+- For linear models: used `drop_first=True` to avoid multicollinearity
+- For clustering diagnostics: kept full one-hot to interpret surfaces (including carpet)
+
+</details>
 │   └── models/                                # Trained model files
 ├── README.md                                  # This file (serves as final report)
 ├── requirements.txt                           # Python dependencies
@@ -297,330 +445,3 @@ Applied `pd.get_dummies(drop_first=True)` to **7 categorical features**:
 - Dropping one category creates **reference category** (baseline for model interpretation)
 
 ---
-
-#### **H. Final Cleanup - Removing Player Identifiers**
-
-**Dropped**: `player1_id`, `player2_id`, `player1_name`, `player2_name`
-
-**Reason**: Prevent model from memorizing specific players (overfitting)
-
-**Final Model-Ready Dataset**: **77 features** × **124,097 matches**
-
----
-
-### **Summary of Preprocessing Pipeline**
-
-| Stage              | Action                                                   | Result                          |
-| ------------------ | -------------------------------------------------------- | ------------------------------- |
-| **Load**           | Combined Main Tour + Challenger/Qual matches (2014-2024) | 124,429 matches, 49 columns     |
-| **Drop leakage**   | Removed match outcomes, statistics, identifiers          | 124,429 matches, 24 columns     |
-| **Clean**          | Imputed/dropped missing values                           | 124,097 matches, 24 columns     |
-| **Reframe**        | Winner/loser → player1/player2 (balanced target)         | 124,097 matches, 25 columns     |
-| **Drop countries** | Removed `player1_ioc`, `player2_ioc`                     | 124,097 matches, 23 columns     |
-| **Encode**         | One-hot encoded 7 categorical features                   | 124,097 matches, 81 columns     |
-| **Drop IDs**       | Removed player IDs and names                             | 124,097 matches, **77 columns** |
-
----
-
-### **Saved Datasets**
-
-| File                                       | Purpose                           | Columns |
-| ------------------------------------------ | --------------------------------- | ------- |
-| `matches_cleaned_columns_dropped.csv`      | After dropping leakage columns    | 24      |
-| `matches_final_with_player_context.csv`    | Encoded but with player IDs/names | 81      |
-| `matches_final_without_player_context.csv` | **Model-ready dataset**           | **77**  |
-
----
-
-### 2. Feature Engineering
-
-[To be completed in `02_feature_engineering.ipynb`]
-
-**Planned Features**:
-
-- Rank difference (`player1_rank - player2_rank`)
-- Age difference (`player1_age - player2_age`)
-- Height difference (`player1_ht - player2_ht`)
-- Surface-specific win rates (historical performance per surface)
-- Head-to-head records (historical matchup records)
-- Recent form/momentum features
-- Optional: Custom ELO rating system
-
-**Planned Feature Selection Techniques**:
-
-- Correlation analysis (heatmap to identify multicollinearity)
-- Mutual Information scores
-- Model-based feature importance (Random Forest)
-- Recursive Feature Elimination (RFE)
-
----
-
-### 3. Modeling & Evaluation
-
-#### **Data Split Strategy**
-
-- **Training**: 2014-2022 (104,874 matches, 84.5%)
-- **Validation**: 2023 (10,663 matches, 8.6%)
-- **Test**: 2024 (8,560 matches, 6.9%)
-- **Note**: `tourney_date` dropped from features (used only for splitting)
-
----
-
-#### **Baseline Model 1: Decision Tree (No Feature Engineering)** ✅
-
-**Purpose**: Establish baseline performance before feature engineering
-
-**Configuration**:
-
-- Algorithm: DecisionTreeClassifier
-- Parameters: `max_depth=10`, `random_state=42`
-- Features: 75 (preprocessed features only)
-
-**Results**:
-
-| Metric        | Training | Validation | Test   |
-| ------------- | -------- | ---------- | ------ |
-| **Accuracy**  | 65.96%   | 62.68%     | 62.14% |
-| **Precision** | 0.6518   | 0.6168     | 0.6136 |
-| **Recall**    | 0.6555   | 0.6264     | 0.6208 |
-| **F1-Score**  | 0.6536   | 0.6215     | 0.6172 |
-
-**Key Findings**:
-
-- Top 3 features: `player1_rank` (47.4%), `player2_rank` (36.1%), `player2_age` (4.2%)
-- Overfitting gap: 3.28% (train-val) - acceptable
-- Baseline accuracy: ~62% on unseen 2024 data
-
----
-
-#### **Planned Models** (To be completed)
-
-- Logistic Regression (linear baseline)
-- Random Forest (ensemble method)
-- Gradient Boosting (XGBoost/LightGBM)
-- Support Vector Machine (SVM)
-- k-Nearest Neighbors (k-NN)
-- Models with engineered features (rank_diff, age_diff, etc.)
-
----
-
-## 🔬 Key Results
-
-[To be filled after modeling]
-
----
-
-## 🧩 Challenges Encountered
-
-### 1. Information Leakage Prevention
-
-- **Challenge**: Original dataset had winner/loser format which would leak outcome information to the model
-- **Solution**: Implemented random player position assignment (player1/player2) with reproducible seed, achieving perfect class balance (50.16% / 49.84%)
-
-### 2. Missing Data Handling
-
-- **Challenge**: Multiple features had missing values with different missingness patterns
-- **Solution**: Applied domain-driven imputation:
-  - `winner_entry`/`loser_entry`: NaN means "Direct" entry (domain knowledge)
-  - Height: Imputed using country median
-  - Rank: Imputed with max_rank + 1 for unranked players, added flag columns
-  - Dropped rows with <0.1% missingness in critical features
-
-### 3. Dimensionality vs. Information Trade-off
-
-- **Challenge**: Country codes (IOC) would add 300+ sparse columns but contain potentially useful information
-- **Solution**: Dropped for initial modeling to avoid curse of dimensionality; can revisit as grouped/aggregated features in feature engineering
-
-### 4. Futures Match Data Quality
-
-- **Challenge**: Futures matches (lower-tier tournaments) had ~40% missing match statistics
-- **Solution**: Excluded Futures matches entirely; focused on Main Tour and Challenger/Qualification matches (2014-2024)
-
----
-
-## 📚 Code Organization
-
-### Notebook Structure
-
-#### **1. `EDA_and_preprocessing.ipynb`** ✅ COMPLETED
-
-**Sections**:
-
-1. **Setup & Data Loading**
-
-   - Import libraries (pandas, numpy, matplotlib, seaborn)
-   - Load ATP matches, rankings, and player data
-   - Initial data inspection and quality assessment
-
-2. **Exploratory Data Analysis (EDA)**
-
-   - Visualize ranking and points distributions
-   - Analyze missing value patterns
-   - Identify data quality issues (Futures matches)
-
-3. **Feature Removal** (Information Leakage Prevention)
-
-   - Drop seed columns (redundant with rank)
-   - Drop identifiers (tourney_id, match_num, tourney_name)
-   - Drop match outcomes (score, minutes)
-   - Drop match statistics (w*\*, l*\* columns)
-
-4. **Data Cleaning**
-
-   - Impute missing `surface` (drop 53 rows)
-   - Impute missing `winner_entry`/`loser_entry` with 'Direct'
-   - Impute missing heights using country median
-   - Drop rows with minimal missing values (<0.1%)
-   - Impute missing ranks with max_rank + 1, create flag columns
-   - Drop rank_points columns (weak correlation with rank)
-
-5. **Data Reframing** (Winner/Loser → Player1/Player2)
-
-   - Set random seed (89) for reproducibility
-   - Create flip column for random player assignment
-   - Vectorized implementation using `np.where()`
-   - Create `player1_won` target variable
-   - Result: Perfectly balanced classes (50.16% / 49.84%)
-
-6. **Dimensionality Control**
-
-   - Drop country codes (`player1_ioc`, `player2_ioc`)
-
-7. **Categorical Encoding**
-
-   - One-hot encode 7 categorical features
-   - Use `drop_first=True` to avoid multicollinearity
-   - Result: 23 → 81 columns
-
-8. **Final Cleanup**
-   - Drop player IDs and names
-   - Save model-ready dataset (77 columns)
-
-**Outputs**:
-
-- `data/processed/matches_cleaned_columns_dropped.csv` (24 columns)
-- `data/processed/matches_final_with_player_context.csv` (81 columns)
-- `data/processed/matches_final_without_player_context.csv` (77 columns) ← **Model-ready**
-
----
-
-#### **2. `02_feature_engineering.ipynb`** (Planned)
-
-**Planned Sections**:
-
-1. Load preprocessed data
-2. Create derived features (rank/age/height differences)
-3. Engineer historical features (surface win rates, head-to-head)
-4. Feature selection (correlation, mutual information, RFE)
-5. Save feature-engineered dataset
-
----
-
-#### **3. `modeling_and_evaluation.ipynb`** ✅ BASELINE COMPLETED
-
-**Completed Sections**:
-
-1. Import libraries and load preprocessed data (77 features, 124,097 matches)
-2. Train/validation/test split by date (2014-2022 / 2023 / 2024)
-3. Baseline Decision Tree model training
-4. Performance evaluation (accuracy, precision, recall, F1-score)
-5. Confusion matrix and classification report
-6. Feature importance analysis
-7. Results summary
-
-**Outputs**:
-
-- `results/baseline_dt_feature_importance.csv` (feature rankings)
-- Confusion matrix visualization
-- Performance metrics across train/val/test sets
-
-**Planned Additions**:
-
-- Additional models (Random Forest, XGBoost, Logistic Regression)
-- Models with feature-engineered datasets
-- Hyperparameter tuning
-- Model comparison and final selection
-
----
-
-## 📊 Running the Analysis
-
-### Start Jupyter Notebook
-
-```bash
-# Navigate to project directory
-cd "/Users/oz/Desktop/459 Ester/project"
-
-# Activate virtual environment (if using one)
-source venv/bin/activate  # macOS/Linux
-# OR
-venv\Scripts\activate     # Windows
-
-# Start Jupyter
-jupyter notebook
-```
-
-Then open `notebooks/EDA_and_preprocessing.ipynb` and run cells sequentially.
-
-### Saving Results
-
-- **Figures**: Save plots to `results/figures/` using `plt.savefig()`
-- **Processed Data**: Save cleaned data to `data/processed/` using `df.to_csv()`
-- **Models**: Save trained models to `results/models/` using `joblib.dump()` or `pickle`
-
----
-
-## 🎓 References
-
-1. Sackmann, J. (2024). _ATP Tennis Database_. GitHub. https://github.com/JeffSackmann/tennis_atp
-2. [Add any papers or resources you referenced]
-
----
-
-## 📝 Project Deliverables Checklist
-
-### ✅ Phase 1: Project Proposal (Due Sept 30, 2025)
-
-- [x] Dataset selected and linked
-- [x] Dataset statistics documented
-- [x] Rationale provided
-- [x] Research questions defined
-
-### ✅ Phase 2: Data Preprocessing & EDA
-
-- [x] Basic EDA completed (distributions, correlations)
-- [x] Missing value handling (domain-driven imputation strategies)
-- [x] Feature encoding (one-hot encoding with drop_first=True)
-- [x] Data reframing (winner/loser → player1/player2)
-- [x] Information leakage prevention (dropped match outcomes and statistics)
-- [x] Class balancing (50.16% / 49.84% split via random assignment)
-- [ ] Feature engineering (in progress)
-- [ ] Dimensionality reduction (planned for modeling phase)
-
-### ✅ Phase 3: Final Project Delivery
-
-- [x] Baseline model trained (Decision Tree, 62.14% test accuracy)
-- [ ] Feature engineering (rank_diff, age_diff, surface win rates)
-- [ ] Multiple classification algorithms (3+ models)
-- [ ] Hyperparameter tuning
-- [ ] Model comparison and evaluation
-- [ ] Clustering analysis (3+ algorithms)
-- [ ] Outlier detection (3+ methods)
-- [ ] Feature selection (mutual information, RFE)
-- [ ] Final report (max 2 pages)
-- [ ] Clean, well-documented code
-
----
-
-## 📞 Contact
-
-For questions or collaborations:
-
-- [Your Email]
-- [Teammate Email]
-
----
-
-## 📜 License
-
-This project is for academic purposes as part of CMPT 459 at Simon Fraser University.
